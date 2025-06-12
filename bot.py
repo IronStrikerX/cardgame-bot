@@ -380,17 +380,19 @@ async def pg(ctx, *, card: str):
 
 
 # --- BMB Commands ---
-
 @bot.command(name="startBMB")
 async def start_ip(ctx, p1: discord.Member, p2: discord.Member):
-    global bmb_players, bmb_active, bmb_turn_index, bmb_pot, bmb_price, bmb_chips, bmb_current_cards, bmb_bets, bmb_last_raiser
+    global bmb_players, bmb_active, bmb_turn_index, bmb_pot, bmb_price
+    global bmb_chips, bmb_current_cards, bmb_bets, bmb_last_raiser, BMB_ANTE
+
+    BMB_ANTE = 5 
 
     if bmb_active:
         await ctx.send("A BMB game is already in progress.")
         return
 
     bmb_players = [p1, p2]
-    bmb_chips = {p1: 10, p2: 10} #inital chips
+    bmb_chips = {p1: 100, p2: 100}
     bmb_active = True
     bmb_turn_index = 0
     bmb_pot = 0
@@ -399,16 +401,19 @@ async def start_ip(ctx, p1: discord.Member, p2: discord.Member):
     bmb_bets = {p1: 0, p2: 0}
     bmb_last_raiser = None
 
-    # Both players plays 1 chip
+    # Apply ante
     for player in bmb_players:
-        bmb_chips[player] -= 1
-        bmb_pot += 1
-        bmb_bets[player] = 1
-
-    bmb_price = 0 # no raises
+        bmb_chips[player] -= BMB_ANTE
+        bmb_pot += BMB_ANTE
+        bmb_bets[player] = BMB_ANTE
 
     await deal_bmb_cards()
-    await ctx.send(f"Blind Man's Bluff started between {p1.mention} and {p2.mention}!\nEach player plays 1 chip.\nPot: {bmb_pot}.\n{bmb_players[0].mention}, it's your turn! Use `!raise`, `!call`, or `!fold`.")
+    await ctx.send(
+        f"Blind Man's Bluff started between {p1.mention} and {p2.mention}!\n"
+        f"Each player antes {BMB_ANTE} chip(s).\n"
+        f"Pot: {bmb_pot}.\n"
+        f"{bmb_players[0].mention}, it's your turn! Use `!raise`, `!call`, or `!fold`."
+    )
 
 async def deal_bmb_cards():
     global bmb_current_cards
@@ -432,6 +437,10 @@ async def bmb_raise_cmd(ctx, amount: int = 1):
 
     player = ctx.author
     if not bmb_active or player != bmb_players[bmb_turn_index]:
+        return
+    
+    if to_call < BMB_ANTE:
+        await ctx.send(f"{player.mention}, you have to raise more than the ante which is at: {BMB_ANTE}.")
         return
 
     opponent = bmb_players[1 - bmb_turn_index]
@@ -467,8 +476,10 @@ async def bmb_call_cmd(ctx):
     opponent = bmb_players[1 - bmb_turn_index]
     to_call = bmb_bets[opponent] - bmb_bets[player]
 
-    if to_call <= 0:
-        await ctx.send(f"{player.display_name}, there is nothing to call. You must `!raise 0` or `!fold`.")
+    if to_call == 0:
+        # Nothing to call. treat as a check and pass turn
+        await ctx.send(f"{player.display_name} checks.\n{opponent.mention}, your move!")
+        bmb_turn_index = 1 - bmb_turn_index
         return
 
     call_amount = min(bmb_chips[player], to_call)
@@ -476,7 +487,7 @@ async def bmb_call_cmd(ctx):
     bmb_bets[player] += call_amount
     bmb_pot += call_amount
 
-    # Reveal cards
+
     p1, p2 = bmb_players
     card1 = bmb_current_cards[p1]
     card2 = bmb_current_cards[p2]
@@ -494,11 +505,11 @@ async def bmb_call_cmd(ctx):
         winner = None
 
     if winner:
-        # player wins but doesn't match the full price
-        if bmb_chips[player] == 0 and player == winner and call_amount < to_call:
-            await ctx.send(f"{winner.display_name} wins but couldn't match the full raise — they win only {call_amount} chips.")
-            bmb_chips[winner] += call_amount
-            bmb_chips[opponent] += bmb_pot - call_amount
+        if bmb_bets[player] < bmb_bets[opponent] and winner == player:
+            win_amount = bmb_bets[player] + (bmb_pot - bmb_bets[player] - bmb_bets[opponent])
+            await ctx.send(f"{winner.display_name} wins but didn't match the full raise — they win only {win_amount} chips.")
+            bmb_chips[winner] += win_amount
+            bmb_chips[opponent] += bmb_pot - win_amount
         else:
             bmb_chips[winner] += bmb_pot
             await ctx.send(f"{winner.display_name} wins the round and takes {bmb_pot} chips!")
@@ -506,7 +517,7 @@ async def bmb_call_cmd(ctx):
         await ctx.send("It's a tie. Pot is split.")
         bmb_chips[p1] += bmb_pot // 2
         bmb_chips[p2] += bmb_pot - (bmb_pot // 2)
-    
+
     bmb_pot = 0
     await display_chip_counts(ctx)
 
@@ -519,6 +530,8 @@ async def bmb_call_cmd(ctx):
     else:
         await start_new_bmb_round(ctx)
 
+
+
 async def start_new_bmb_round(ctx):
     global bmb_turn_index, bmb_pot, bmb_price, bmb_bets, bmb_current_cards, bmb_last_raiser
 
@@ -530,12 +543,12 @@ async def start_new_bmb_round(ctx):
 
     for player in bmb_players:
         if bmb_chips[player] > 0:
-            bmb_chips[player] -= 1
-            bmb_pot += 1
-            bmb_bets[player] = 1
+            bmb_chips[player] -= BMB_ANTE
+            bmb_pot += BMB_ANTE
+            bmb_bets[player] = BMB_ANTE
 
     await deal_bmb_cards()
-    await ctx.send(f"New round begins! Each player plays 1 chip.\nPot: {bmb_pot}.\n{bmb_players[0].mention}, it's your turn! Use `!raise`, `!call`, or `!fold`.")
+    await ctx.send(f"New round begins! Each player antes {BMB_ANTE} chip(s).\nPot: {bmb_pot}.\n{bmb_players[0].mention}, it's your turn! Use `!raise`, `!call`, or `!fold`.")
 
 @bot.command(name="fold")
 async def bmb_fold_cmd(ctx):
@@ -561,6 +574,7 @@ async def bmb_fold_cmd(ctx):
 async def display_chip_counts(ctx):
     p1, p2 = bmb_players
     await ctx.send(f"Chips now:\n{p1.display_name}: {bmb_chips[p1]}\n{p2.display_name}: {bmb_chips[p2]}")
+
 # ---------------------------------
 
 
