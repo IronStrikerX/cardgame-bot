@@ -378,7 +378,6 @@ async def pg(ctx, *, card: str):
 # ----------------------------------
 
 
-
 # --- BMB Commands ---
 @bot.command(name="startBMB")
 async def start_ip(ctx, p1: discord.Member, p2: discord.Member):
